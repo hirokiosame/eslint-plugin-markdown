@@ -257,6 +257,17 @@ describe("processor", function() {
             assert.equal(blocks.length, 1);
         });
 
+        it("should ignore anything after the first word of the info string", function() {
+            var code = [
+                "```js more words are ignored",
+                "var answer = 6 * 7;",
+                "```"
+            ].join("\n");
+            var blocks = processor.preprocess(code);
+
+            assert.equal(blocks.length, 1);
+        });
+
         it("should find code fences not surrounded by blank lines", function() {
             var code = [
                 "<!-- eslint-disable -->",
@@ -368,6 +379,25 @@ describe("processor", function() {
                 "    ]",
                 "*/",
                 "alert('Hello, world!');"
+            ].join("\n"));
+        });
+
+        it("should insert global comments", function() {
+            var code = [
+                "<!-- global foo -->",
+                "<!-- global bar:false, baz:true -->",
+                "",
+                "```js",
+                "alert(foo, bar, baz);",
+                "```"
+            ].join("\n");
+            var blocks = processor.preprocess(code);
+
+            assert.equal(blocks.length, 1);
+            assert.equal(blocks[0], [
+                "/* global foo */",
+                "/* global bar:false, baz:true */",
+                "alert(foo, bar, baz);"
             ].join("\n"));
         });
 
@@ -495,13 +525,13 @@ describe("processor", function() {
         ].join("\n");
         var messages = [
             [
-                { line: 1, column: 1, message: "Use the global form of \"use strict\".", ruleId: "strict" },
-                { line: 3, column: 5, message: "Unexpected console statement.", ruleId: "no-console" }
+                { line: 1, endLine: 1, column: 1, message: "Use the global form of \"use strict\".", ruleId: "strict" },
+                { line: 3, endLine: 3, column: 5, message: "Unexpected console statement.", ruleId: "no-console" }
             ], [
-                { line: 3, column: 6, message: "Missing trailing comma.", ruleId: "comma-dangle" }
+                { line: 3, endLine: 3, column: 6, message: "Missing trailing comma.", ruleId: "comma-dangle", fix: { range: [24, 24], text: "," } }
             ], [
-                { line: 3, column: 2, message: "Unreachable code after return.", ruleId: "no-unreachable" },
-                { line: 4, column: 2, message: "Unnecessary semicolon.", ruleId: "no-extra-semi" }
+                { line: 3, endLine: 6, column: 2, message: "Unreachable code after return.", ruleId: "no-unreachable" },
+                { line: 4, endLine: 4, column: 2, message: "Unnecessary semicolon.", ruleId: "no-extra-semi", fix: { range: [38, 39], text: "" } }
             ]
         ];
 
@@ -536,6 +566,16 @@ describe("processor", function() {
             assert.equal(result[4].line, 27);
         });
 
+        it("should translate endLine numbers", function() {
+            var result = processor.postprocess(messages);
+
+            assert.equal(result[0].endLine, 4);
+            assert.equal(result[1].endLine, 6);
+            assert.equal(result[2].endLine, 17);
+            assert.equal(result[3].endLine, 29);
+            assert.equal(result[4].endLine, 27);
+        });
+
         it("should translate column numbers", function() {
             var result = processor.postprocess(messages);
 
@@ -551,14 +591,42 @@ describe("processor", function() {
             assert.equal(result[4].column, 2);
         });
 
-        it("should exclude eol-last messages", function() {
-            var result = processor.postprocess([
-                [
-                    { line: 4, column: 3, message: "Newline required at end of file but not found.", ruleId: "eol-last" }
-                ]
-            ]);
+        it("should adjust fix range properties", function() {
+            var result = processor.postprocess(messages);
 
-            assert.equal(result.length, 0);
+            assert(result[2].fix.range, [185, 185]);
+            assert(result[4].fix.range, [264, 265]);
+        });
+
+        describe("should exclude messages from unsatisfiable rules", function() {
+
+            it("eol-last", function() {
+                var result = processor.postprocess([
+                    [
+                        { line: 4, column: 3, message: "Newline required at end of file but not found.", ruleId: "eol-last" }
+                    ]
+                ]);
+
+                assert.equal(result.length, 0);
+            });
+
+            it("unicode-bom", function() {
+                var result = processor.postprocess([
+                    [
+                        { line: 1, column: 1, message: "Expected Unicode BOM (Byte Order Mark).", ruleId: "unicode-bom" }
+                    ]
+                ]);
+
+                assert.equal(result.length, 0);
+            });
+
+        });
+
+    });
+
+    describe("supportsAutofix", function() {
+        it("should equal true", function() {
+            assert.equal(processor.supportsAutofix, true);
         });
     });
 
